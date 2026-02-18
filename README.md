@@ -263,6 +263,22 @@ python eval_metrics.py \
 >
 > **TODO:** Add metric computation scripts for FasterVQA, DOVER, and $E^*_{warp}$.
 
+### Attention-Flow Visualization
+
+You can visualize transformer-layer attention correspondence and compare it to RAFT optical flow:
+
+```bash
+python finetune/scripts/visualize_attention_flow.py \
+  --input datasets/demo/demo.mp4 \
+  --model_path pretrained_models/DOVE \
+  --output_dir results/attn_flow \
+  --prompt "" \
+  --src_frame 0 \
+  --dst_frame 1
+```
+
+The script writes one panel image per attention layer and a summary file at `results/attn_flow/summary.json`.
+
 ## <a name="results"></a>🔎 Results
 
 We achieve state-of-the-art performance on real-world video super-resolution. Visual results are available at [Google Drive](https://drive.google.com/drive/folders/1J92X1amVijH9dNWGQcz-6Cx44B7EipWr?usp=drive_link).
