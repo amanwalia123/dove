@@ -243,6 +243,12 @@ def _flow_token_grid(flow_px_2hw: torch.Tensor, grid_h: int, grid_w: int, stride
     return flow_token
 
 
+def _token_flow_to_pixel_flow(flow_token_hw2: np.ndarray, out_h: int, out_w: int, stride_px: int) -> np.ndarray:
+    flow_px_grid = flow_token_hw2 * float(stride_px)
+    flow_px_full = cv2.resize(flow_px_grid, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
+    return flow_px_full
+
+
 def _run_single_forward(
     pipe: CogVideoXPipeline,
     video_input_1cfhw: torch.Tensor,
@@ -420,9 +426,11 @@ def main():
 
     stride_px = meta_dummy["vae_scale"] * pipe.transformer.config.patch_size
     flow_token = _flow_token_grid(flow_pair, grid_h, grid_w, stride_px=stride_px)
+    flow_pair_px = flow_pair.permute(1, 2, 0).numpy()
 
     src_frame_rgb = _as_uint8_rgb(frames_norm[src_raw_frame])
-    flow_rgb = _flow_to_image_rgb(flow_token)
+    flow_rgb = _flow_to_image_rgb(flow_pair_px)
+    full_h, full_w = src_frame_rgb.shape[:2]
 
     results = {
         "meta": {
@@ -443,23 +451,31 @@ def main():
     for layer_i, layer_name in enumerate(layer_names):
         affinity = capture.affinity_by_layer[layer_name]
         attn_disp_token, conf = _compute_layer_correspondence(affinity, grid_h, grid_w)
-        epe = np.sqrt(np.sum((attn_disp_token - flow_token) ** 2, axis=-1))
-        attn_flow_rgb = _flow_to_image_rgb(attn_disp_token)
-        epe_rgb = _epe_colormap(epe)
+        epe_token = np.sqrt(np.sum((attn_disp_token - flow_token) ** 2, axis=-1))
+
+        attn_disp_px = _token_flow_to_pixel_flow(attn_disp_token, out_h=full_h, out_w=full_w, stride_px=stride_px)
+        epe_px = np.sqrt(np.sum((attn_disp_px - flow_pair_px) ** 2, axis=-1))
+
+        attn_flow_rgb = _flow_to_image_rgb(attn_disp_px)
+        epe_rgb = _epe_colormap(epe_px)
 
         panel = _stack_panels([src_frame_rgb, flow_rgb, attn_flow_rgb, epe_rgb])
         panel_path = os.path.join(args.output_dir, f"layer_{layer_i:03d}.png")
         cv2.imwrite(panel_path, cv2.cvtColor(panel, cv2.COLOR_RGB2BGR))
 
         conf_mean = float(conf.mean())
-        epe_mean = float(epe.mean())
-        epe_median = float(np.median(epe))
+        epe_token_mean = float(epe_token.mean())
+        epe_token_median = float(np.median(epe_token))
+        epe_px_mean = float(epe_px.mean())
+        epe_px_median = float(np.median(epe_px))
         results["layers"][layer_name] = {
             "index": layer_i,
             "panel_path": panel_path,
             "confidence_mean": conf_mean,
-            "epe_mean_token": epe_mean,
-            "epe_median_token": epe_median,
+            "epe_mean_token": epe_token_mean,
+            "epe_median_token": epe_token_median,
+            "epe_mean_pixel": epe_px_mean,
+            "epe_median_pixel": epe_px_median,
         }
 
     summary_path = os.path.join(args.output_dir, "summary.json")
